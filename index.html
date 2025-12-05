@@ -18,14 +18,19 @@
         import { getFirestore, collection, doc, setDoc, getDoc, updateDoc, onSnapshot, arrayUnion, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // =================================================================
-        //  منطقة إعدادات Firebase (الحل الجذري للاستضافة الخارجية)
+        //  ⚙️ منطقة إعدادات Firebase (الحل الجذري للاستضافة الخارجية)
         // =================================================================
         
-        // 1. اذهب إلى Firebase Console -> Project Settings
-        // 2. انسخ بيانات التكوين (firebaseConfig) وضعها هنا بدلاً من القيم الفارغة
-        // ملاحظة: القيم الحالية هي مجرد أمثلة، يجب استبدالها ببياناتك لتعمل اللعبة
+        // لكي تعمل اللعبة أونلاين، يجب عليك إنشاء مشروع مجاني في Google Firebase:
+        // 1. اذهب إلى https://console.firebase.google.com
+        // 2. أنشئ مشروعاً جديداً (Create Project).
+        // 3. أضف تطبيق ويب (Web App) واحصل على بيانات التكوين (firebaseConfig).
+        // 4. قم بتفعيل "Authentication" (وضع Anonymous) من قائمة Build.
+        // 5. قم بتفعيل "Firestore Database" (وضع Test Mode) من قائمة Build.
+        // 6. استبدل القيم في الأسفل بالبيانات التي حصلت عليها من Firebase.
+
         const manualConfig = {
-            apiKey: "ضع_API_KEY_الخاص_بك_هنا",
+            apiKey: "ضع_API_KEY_الخاص_بك_هنا", // مثال: AIzaSyB...
             authDomain: "example-project.firebaseapp.com",
             projectId: "example-project",
             storageBucket: "example-project.appspot.com",
@@ -45,7 +50,8 @@
             } else {
                 // استضافة خارجية (GitHub Pages وغيرها)
                 // التحقق مما إذا قام المستخدم بوضع بيانات حقيقية
-                if (manualConfig.apiKey === "ضع_API_KEY_الخاص_بك_هنا") {
+                // نقوم بفحص بسيط للتأكد من أن المستخدم قد غير القيم الافتراضية
+                if (manualConfig.apiKey.includes("ضع_API_KEY") || manualConfig.projectId === "example-project") {
                     throw new Error("Missing_Config");
                 }
                 firebaseConfig = manualConfig;
@@ -116,8 +122,9 @@
                     configErrorMsg.classList.remove('hidden');
                     configErrorMsg.innerHTML = `
                         <p class="font-bold">تنبيه هام:</p>
-                        <p>اللعبة لا تعمل لأن إعدادات Firebase مفقودة.</p>
-                        <p class="text-xs mt-2">إذا كنت المطور، يرجى فتح ملف الكود وملء كائن <code>manualConfig</code> في الأعلى ببيانات مشروعك.</p>
+                        <p>اللعبة لا تعمل لأن إعدادات Firebase مفقودة أو غير صحيحة.</p>
+                        <p class="text-xs mt-2">يرجى فتح ملف الكود (Lines 30-38) ووضع بيانات مشروعك من Firebase Console في المتغير <code>manualConfig</code>.</p>
+                        <p class="text-xs mt-1 text-yellow-300">تأكد أيضاً من تفعيل Authentication (Anonymous) و Firestore في لوحة تحكم Firebase.</p>
                     `;
                 }
 
