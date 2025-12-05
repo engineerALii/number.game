@@ -17,21 +17,47 @@
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, doc, setDoc, getDoc, updateDoc, onSnapshot, arrayUnion, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // --- إعدادات Firebase والتهيئة ---
-        // ملاحظة: إذا كنت تستخدم الكود خارج هذه البيئة (مثل GitHub Pages)، يجب عليك ملء هذا الكائن ببيانات مشروعك الحقيقي
-        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        // =================================================================
+        //  منطقة إعدادات Firebase (الحل الجذري للاستضافة الخارجية)
+        // =================================================================
         
-        // التحقق من وجود الإعدادات
-        if (Object.keys(firebaseConfig).length === 0) {
-            console.warn("No Firebase config found. App may not work externally without manual config.");
+        // 1. اذهب إلى Firebase Console -> Project Settings
+        // 2. انسخ بيانات التكوين (firebaseConfig) وضعها هنا بدلاً من القيم الفارغة
+        // ملاحظة: القيم الحالية هي مجرد أمثلة، يجب استبدالها ببياناتك لتعمل اللعبة
+        const manualConfig = {
+            apiKey: "ضع_API_KEY_الخاص_بك_هنا",
+            authDomain: "example-project.firebaseapp.com",
+            projectId: "example-project",
+            storageBucket: "example-project.appspot.com",
+            messagingSenderId: "00000000000",
+            appId: "1:00000000000:web:00000000000000"
+        };
+
+        // الكود يقوم تلقائياً باختيار الإعدادات المناسبة (بيئة المعاينة أو الاستضافة الخاصة بك)
+        let firebaseConfig;
+        let appId;
+
+        try {
+            if (typeof __firebase_config !== 'undefined') {
+                // بيئة المعاينة الداخلية
+                firebaseConfig = JSON.parse(__firebase_config);
+                appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+            } else {
+                // استضافة خارجية (GitHub Pages وغيرها)
+                // التحقق مما إذا قام المستخدم بوضع بيانات حقيقية
+                if (manualConfig.apiKey === "ضع_API_KEY_الخاص_بك_هنا") {
+                    throw new Error("Missing_Config");
+                }
+                firebaseConfig = manualConfig;
+                appId = manualConfig.projectId || 'default-app-id';
+            }
+        } catch (e) {
+            console.error("Config Error:", e);
+            // سيتم التعامل مع هذا الخطأ وعرض رسالة للمستخدم في دالة initApp
         }
 
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getFirestore(app);
-
         // --- متغيرات الحالة العامة ---
+        let app, auth, db;
         let currentUser = null;
         let currentRoomId = null;
         let currentPlayerName = "";
@@ -47,32 +73,67 @@
         
         const btnCreate = document.getElementById('btn-create');
         const btnJoin = document.getElementById('btn-join');
+        const configErrorMsg = document.getElementById('config-error-msg');
 
         // --- بدء التطبيق والتوثيق ---
         async function initApp() {
-            // ربط الأزرار برمجياً لضمان العمل داخل Module
+            // ربط الأزرار برمجياً
             if(btnCreate) btnCreate.addEventListener('click', createRoom);
             if(btnJoin) btnJoin.addEventListener('click', joinRoom);
 
             try {
+                // التحقق من وجود الإعدادات قبل البدء
+                if (!firebaseConfig || !firebaseConfig.apiKey) {
+                    throw new Error("لم يتم العثور على إعدادات Firebase. يرجى تعديل الكود وإضافة manualConfig.");
+                }
+
+                app = initializeApp(firebaseConfig);
+                auth = getAuth(app);
+                db = getFirestore(app);
+
+                // الاستماع لحالة الدخول
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        currentUser = user;
+                        showScreen('login');
+                        enableButtons();
+                        if(configErrorMsg) configErrorMsg.classList.add('hidden');
+                    }
+                });
+
+                // محاولة تسجيل الدخول
                 if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
                     await signInWithCustomToken(auth, __initial_auth_token);
                 } else {
                     await signInAnonymously(auth);
                 }
+
             } catch (error) {
-                console.error("Auth Error:", error);
-                if(btnCreate) btnCreate.innerText = "خطأ في الاتصال";
+                console.error("Initialization Error:", error);
+                
+                // عرض رسالة الخطأ للمستخدم
+                if (configErrorMsg) {
+                    configErrorMsg.classList.remove('hidden');
+                    configErrorMsg.innerHTML = `
+                        <p class="font-bold">تنبيه هام:</p>
+                        <p>اللعبة لا تعمل لأن إعدادات Firebase مفقودة.</p>
+                        <p class="text-xs mt-2">إذا كنت المطور، يرجى فتح ملف الكود وملء كائن <code>manualConfig</code> في الأعلى ببيانات مشروعك.</p>
+                    `;
+                }
+
+                // تحديث حالة الأزرار لتوضح المشكلة
+                if(btnCreate) {
+                    btnCreate.innerText = "خطأ في الإعدادات";
+                    btnCreate.classList.add('bg-red-600', 'hover:bg-red-700');
+                    btnCreate.classList.remove('bg-indigo-600', 'hover:bg-indigo-700');
+                }
+                if(btnJoin) {
+                    btnJoin.innerText = "تأكد من الكود";
+                    btnJoin.classList.add('bg-red-600', 'hover:bg-red-700');
+                    btnJoin.classList.remove('bg-slate-600', 'hover:bg-slate-500');
+                }
             }
         }
-
-        onAuthStateChanged(auth, (user) => {
-            if (user) {
-                currentUser = user;
-                showScreen('login');
-                enableButtons();
-            }
-        });
 
         function enableButtons() {
             if (btnCreate) {
@@ -146,7 +207,6 @@
 
         // --- منطق اللعبة والبيانات ---
 
-        // تحويل الدوال إلى دوال عادية وليست window properties لأننا نستخدم addEventListener
         async function createRoom() {
             if (!currentUser) return;
 
@@ -164,7 +224,7 @@
             try {
                 currentPlayerName = nameInput;
                 currentRoomId = roomInput;
-                // FIX: Added 'rooms' collection segment to make path valid (6 segments)
+                // استخدام المسار الصحيح بـ 6 أجزاء
                 const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', `room_${currentRoomId}`);
 
                 // إنشاء حالة أولية للعبة
@@ -193,7 +253,7 @@
                 subscribeToRoom();
             } catch (err) {
                 console.error(err);
-                alert("حدث خطأ أثناء إنشاء الغرفة");
+                alert("حدث خطأ أثناء إنشاء الغرفة: " + err.message);
                 btnCreate.disabled = false;
                 btnCreate.innerText = "إنشاء غرفة";
             }
@@ -216,7 +276,6 @@
             try {
                 currentPlayerName = nameInput;
                 currentRoomId = roomInput;
-                // FIX: Added 'rooms' collection segment
                 const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', `room_${currentRoomId}`);
                 const roomSnap = await getDoc(roomRef);
 
@@ -247,7 +306,7 @@
                 subscribeToRoom();
             } catch (err) {
                 console.error(err);
-                alert("حدث خطأ أثناء الانضمام");
+                alert("حدث خطأ أثناء الانضمام: " + err.message);
                 btnJoin.disabled = false;
                 btnJoin.innerText = "انضمام";
             }
@@ -256,7 +315,6 @@
         function subscribeToRoom() {
             if (roomUnsubscribe) roomUnsubscribe();
 
-            // FIX: Added 'rooms' collection segment
             const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', `room_${currentRoomId}`);
             
             roomUnsubscribe = onSnapshot(roomRef, (docSnap) => {
@@ -276,11 +334,9 @@
             });
         }
 
-        // جعل دالة بدء اللعبة متاحة للزر في اللوبي (حالة خاصة)
+        // جعل دالة بدء اللعبة متاحة للزر في اللوبي
         window.startGame = async () => {
-             // FIX: Added 'rooms' collection segment
              const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', `room_${currentRoomId}`);
-             // إعادة تعيين البطاقات لضمان العشوائية عند بدء لعبة جديدة
              const cards = Array.from({length: 10}, (_, i) => i + 1).sort(() => Math.random() - 0.5);
              
              await updateDoc(roomRef, {
@@ -295,7 +351,6 @@
         };
         
         window.resetGame = async () => {
-             // إعادة اللعبة بنفس اللاعبين
              window.startGame();
         };
 
@@ -314,7 +369,6 @@
                 list.appendChild(li);
             });
 
-            // إظهار زر البدء فقط للمضيف
             const isHost = data.players.find(p => p.uid === currentUser.uid)?.isHost;
             const startBtn = document.getElementById('start-game-btn');
             if (isHost) {
@@ -326,7 +380,6 @@
         }
 
         function renderGame(data) {
-            // تحديث المعلومات العلوية
             document.getElementById('room-id-display').innerText = `غرفة: ${data.roomId}`;
             const currentPlayer = data.players[data.currentTurnIndex];
             const isMyTurn = currentPlayer?.uid === currentUser.uid;
@@ -337,7 +390,7 @@
             if (data.winner) {
                 turnIndicator.className = "mb-6 p-4 rounded-xl bg-green-600 text-center shadow-lg transform scale-105 transition-all";
                 turnText.innerHTML = `<i class="fas fa-trophy text-yellow-300 text-2xl mb-1 block"></i> الفائز: ${data.winner}`;
-                if (data.status !== 'won') playSound('win'); // تشغيل الصوت مرة واحدة نظرياً
+                if (data.status !== 'won') playSound('win'); 
             } else {
                 turnText.innerHTML = isMyTurn ? 
                     `<span class="text-green-300 font-bold">دورك الآن!</span> ابحث عن الرقم ${data.nextNumber}` : 
@@ -348,33 +401,27 @@
                     "mb-6 p-4 rounded-xl bg-slate-700 text-center shadow-md transition-all";
             }
             
-            // إظهار زر إعادة اللعب إذا انتهت
             if (data.status === 'won') {
                  document.getElementById('reset-game-area').classList.remove('hidden');
             } else {
                  document.getElementById('reset-game-area').classList.add('hidden');
             }
 
-            // رسم الشبكة
             const grid = document.getElementById('game-grid');
             grid.innerHTML = '';
 
             data.cards.forEach((cardValue, index) => {
                 const isRevealed = data.revealedMap[index] === true;
                 const cardEl = document.createElement('div');
-                // فئات Tailwind للبطاقة وتأثير القلب
                 cardEl.className = `relative w-full h-24 sm:h-32 cursor-pointer perspective-1000 group`;
                 
-                // الحاوية الداخلية التي تدور
                 const inner = document.createElement('div');
                 inner.className = `relative w-full h-full duration-500 transform-style-3d transition-transform ${isRevealed ? 'rotate-y-180' : ''}`;
                 
-                // الوجه الأمامي (المخفي)
                 const front = document.createElement('div');
                 front.className = "absolute w-full h-full backface-hidden bg-slate-600 rounded-xl shadow-lg border-b-4 border-slate-800 flex items-center justify-center hover:bg-slate-500 transition-colors";
                 front.innerHTML = `<i class="fas fa-question text-3xl text-slate-400"></i>`;
                 
-                // الوجه الخلفي (الرقم)
                 const back = document.createElement('div');
                 back.className = "absolute w-full h-full backface-hidden bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl shadow-lg border-b-4 border-indigo-800 flex items-center justify-center rotate-y-180";
                 back.innerHTML = `<span class="text-4xl font-bold text-white drop-shadow-md">${cardValue}</span>`;
@@ -383,13 +430,11 @@
                 inner.appendChild(back);
                 cardEl.appendChild(inner);
 
-                // حدث النقر
                 cardEl.onclick = () => handleCardClick(index, cardValue, isRevealed, isMyTurn, data);
 
                 grid.appendChild(cardEl);
             });
 
-            // تحديث الدردشة
             renderChat(data.chat);
         }
 
@@ -397,7 +442,6 @@
             if (!isMyTurn || isRevealed || data.status === 'won') return;
 
             playSound('flip');
-            // FIX: Added 'rooms' collection segment
             const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', `room_${currentRoomId}`);
             
             let updates = {};
@@ -409,13 +453,11 @@
             let actionMsg = "";
 
             if (value === nextNum) {
-                // إجابة صحيحة
                 playSound('correct');
                 revealed[index] = true;
                 nextNum++;
                 actionMsg = `${currentUser.displayName || currentPlayerName} وجد الرقم ${value}!`;
                 
-                // التحقق من الفوز
                 if (nextNum > 10) {
                     status = 'won';
                     winner = currentPlayerName;
@@ -423,13 +465,9 @@
                     actionMsg = `🎉 ${currentPlayerName} فاز باللعبة!`;
                 }
             } else {
-                // إجابة خاطئة
                 playSound('wrong');
-                // القواعد: عند الخطأ، تغلق جميع البطاقات!
-                revealed = {}; // إعادة تعيين كاملة
-                nextNum = 1; // العودة للبحث عن رقم 1
-                
-                // انتقال الدور
+                revealed = {}; 
+                nextNum = 1; 
                 nextTurn = (data.currentTurnIndex + 1) % data.players.length;
                 actionMsg = `❌ ${currentPlayerName} أخطأ (اختار ${value})! تم إعادة تعيين البطاقات.`;
             }
@@ -446,15 +484,11 @@
             await updateDoc(roomRef, updates);
         }
 
-        // --- الدردشة ---
-        
-        // ربط دالة الدردشة للنافذة لأنها تُستدعى من HTML مباشرة (Enter Key)
         window.sendChat = async () => {
             const input = document.getElementById('chat-input');
             const msg = input.value.trim();
             if (!msg) return;
 
-            // FIX: Added 'rooms' collection segment
             const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', `room_${currentRoomId}`);
             const newMsg = {
                 sender: currentPlayerName,
@@ -488,19 +522,15 @@
             chatBox.scrollTop = chatBox.scrollHeight;
         }
 
-        // تشغيل التهيئة
         initApp();
     </script>
 
     <style>
-        /* CSS إضافي لتعزيز Tailwind */
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
         .perspective-1000 { perspective: 1000px; }
         .transform-style-3d { transform-style: preserve-3d; }
         .backface-hidden { backface-visibility: hidden; }
         .rotate-y-180 { transform: rotateY(180deg); }
-        
-        /* شريط التمرير المخصص */
         ::-webkit-scrollbar { width: 8px; }
         ::-webkit-scrollbar-track { background: #1e293b; }
         ::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
@@ -511,7 +541,6 @@
 
     <!-- شاشة الدخول -->
     <div id="login-screen" class="flex-grow flex items-center justify-center p-4 relative overflow-hidden">
-        <!-- خلفية متحركة بسيطة -->
         <div class="absolute top-0 left-0 w-full h-full opacity-10 pointer-events-none">
             <div class="absolute top-10 left-10 text-9xl animate-bounce">?</div>
             <div class="absolute bottom-20 right-20 text-9xl animate-pulse">1</div>
@@ -522,6 +551,10 @@
             <h1 class="text-3xl font-bold text-center mb-2 text-indigo-400">Memory Sequence</h1>
             <p class="text-slate-400 text-center mb-8">رتب الأرقام، تذكر الأماكن، اهزم أصدقائك!</p>
             
+            <!-- منطقة عرض رسالة الخطأ الخاصة بالإعدادات -->
+            <div id="config-error-msg" class="hidden bg-red-900/50 border border-red-500 text-red-200 p-3 rounded mb-4 text-sm text-center">
+            </div>
+
             <div class="space-y-4">
                 <div>
                     <label class="block text-sm font-medium mb-1 text-slate-300">اسم اللاعب</label>
@@ -533,7 +566,6 @@
                 </div>
                 
                 <div class="grid grid-cols-2 gap-4 mt-6">
-                    <!-- تم استبدال onclick بـ ID مع تعطيل مبدئي -->
                     <button id="btn-create" disabled class="bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-lg font-bold transition-all transform hover:scale-105 shadow-lg shadow-indigo-500/30 opacity-50 cursor-not-allowed">
                         <i class="fas fa-spinner fa-spin ml-2"></i>جاري الاتصال...
                     </button>
@@ -545,62 +577,40 @@
         </div>
     </div>
 
-    <!-- شاشة الانتظار (Lobby) -->
+    <!-- باقي الشاشات -->
     <div id="lobby-screen" class="hidden flex-grow flex items-center justify-center p-4">
         <div class="bg-slate-800 p-8 rounded-2xl shadow-2xl w-full max-w-lg border border-slate-700">
             <h2 class="text-2xl font-bold mb-4 text-center border-b border-slate-700 pb-4">غرفة الانتظار</h2>
             <div id="lobby-status" class="text-center text-slate-400 mb-4 animate-pulse">في انتظار اللاعبين...</div>
-            
-            <ul id="lobby-players-list" class="mb-8 max-h-60 overflow-y-auto">
-                <!-- قائمة اللاعبين تظهر هنا -->
-            </ul>
-
+            <ul id="lobby-players-list" class="mb-8 max-h-60 overflow-y-auto"></ul>
             <button id="start-game-btn" onclick="startGame()" class="w-full bg-green-600 hover:bg-green-700 text-white py-3 rounded-lg font-bold text-lg shadow-lg shadow-green-500/30 transition-all hidden">
                 ابـدأ اللعبـة الآن!
             </button>
         </div>
     </div>
 
-    <!-- شاشة اللعبة -->
     <div id="game-screen" class="hidden flex-grow flex flex-col md:flex-row h-screen">
-        
-        <!-- منطقة اللعب (يسار/أعلى) -->
         <div class="flex-grow p-4 md:p-8 flex flex-col items-center justify-center bg-slate-900 overflow-y-auto">
-            
-            <!-- معلومات الغرفة والدور -->
             <div class="w-full max-w-2xl mb-4 flex justify-between items-center text-sm text-slate-400">
                 <span id="room-id-display"></span>
                 <button onclick="location.reload()" class="hover:text-red-400"><i class="fas fa-sign-out-alt"></i> خروج</button>
             </div>
-
-            <!-- مؤشر الدور -->
             <div id="turn-indicator" class="w-full max-w-2xl">
                 <h2 id="turn-text" class="text-xl md:text-2xl">جاري التحميل...</h2>
             </div>
-            
-             <!-- زر إعادة اللعب (يظهر عند الفوز) -->
             <div id="reset-game-area" class="hidden mb-4 w-full max-w-2xl text-center">
                 <button onclick="resetGame()" class="bg-indigo-600 hover:bg-indigo-500 px-6 py-2 rounded-full font-bold shadow-lg animate-bounce">
                     <i class="fas fa-redo ml-2"></i> لعب مرة أخرى
                 </button>
             </div>
-
-            <!-- شبكة البطاقات -->
-            <div id="game-grid" class="grid grid-cols-3 sm:grid-cols-4 gap-3 sm:gap-4 w-full max-w-2xl">
-                <!-- البطاقات تولد هنا -->
-            </div>
+            <div id="game-grid" class="grid grid-cols-3 sm:grid-cols-4 gap-3 sm:gap-4 w-full max-w-2xl"></div>
         </div>
 
-        <!-- منطقة الدردشة (يمين/أسفل) -->
         <div class="w-full md:w-80 bg-slate-800 border-t md:border-t-0 md:border-r border-slate-700 flex flex-col h-1/3 md:h-full shadow-2xl z-20">
             <div class="p-3 bg-slate-900 border-b border-slate-700 font-bold flex items-center">
                 <i class="fas fa-comments ml-2 text-indigo-400"></i> الدردشة المباشرة
             </div>
-            
-            <div id="chat-messages" class="flex-grow p-3 overflow-y-auto space-y-2 bg-slate-800/50">
-                <!-- الرسائل -->
-            </div>
-
+            <div id="chat-messages" class="flex-grow p-3 overflow-y-auto space-y-2 bg-slate-800/50"></div>
             <div class="p-3 bg-slate-900 border-t border-slate-700">
                 <div class="flex gap-2">
                     <input type="text" id="chat-input" 
@@ -611,7 +621,6 @@
                         <i class="fas fa-paper-plane text-sm"></i>
                     </button>
                 </div>
-                <!-- اختصارات ايموجي سريعة -->
                 <div class="flex gap-2 mt-2 justify-center text-lg">
                     <span class="cursor-pointer hover:scale-125 transition-transform" onclick="document.getElementById('chat-input').value += '😂'">😂</span>
                     <span class="cursor-pointer hover:scale-125 transition-transform" onclick="document.getElementById('chat-input').value += '😡'">😡</span>
@@ -620,8 +629,6 @@
                 </div>
             </div>
         </div>
-
     </div>
-
 </body>
 </html>
