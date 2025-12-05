@@ -18,9 +18,15 @@
         import { getFirestore, collection, doc, setDoc, getDoc, updateDoc, onSnapshot, arrayUnion, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // --- إعدادات Firebase والتهيئة ---
+        // ملاحظة: إذا كنت تستخدم الكود خارج هذه البيئة (مثل GitHub Pages)، يجب عليك ملء هذا الكائن ببيانات مشروعك الحقيقي
         const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
         
+        // التحقق من وجود الإعدادات
+        if (Object.keys(firebaseConfig).length === 0) {
+            console.warn("No Firebase config found. App may not work externally without manual config.");
+        }
+
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
         const db = getFirestore(app);
@@ -38,9 +44,16 @@
             lobby: document.getElementById('lobby-screen'),
             game: document.getElementById('game-screen')
         };
+        
+        const btnCreate = document.getElementById('btn-create');
+        const btnJoin = document.getElementById('btn-join');
 
         // --- بدء التطبيق والتوثيق ---
         async function initApp() {
+            // ربط الأزرار برمجياً لضمان العمل داخل Module
+            if(btnCreate) btnCreate.addEventListener('click', createRoom);
+            if(btnJoin) btnJoin.addEventListener('click', joinRoom);
+
             try {
                 if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
                     await signInWithCustomToken(auth, __initial_auth_token);
@@ -49,7 +62,7 @@
                 }
             } catch (error) {
                 console.error("Auth Error:", error);
-                // alert("حدث خطأ في الاتصال بالسيرفر"); // Suppress initial alerts to avoid spam
+                if(btnCreate) btnCreate.innerText = "خطأ في الاتصال";
             }
         }
 
@@ -57,8 +70,24 @@
             if (user) {
                 currentUser = user;
                 showScreen('login');
+                enableButtons();
             }
         });
+
+        function enableButtons() {
+            if (btnCreate) {
+                btnCreate.disabled = false;
+                btnCreate.innerText = "إنشاء غرفة";
+                btnCreate.innerHTML = '<i class="fas fa-plus-circle ml-2"></i>إنشاء غرفة';
+                btnCreate.classList.remove('opacity-50', 'cursor-not-allowed');
+            }
+            if (btnJoin) {
+                btnJoin.disabled = false;
+                btnJoin.innerText = "انضمام";
+                btnJoin.innerHTML = '<i class="fas fa-sign-in-alt ml-2"></i>انضمام';
+                btnJoin.classList.remove('opacity-50', 'cursor-not-allowed');
+            }
+        }
 
         // --- دوال التنقل بين الشاشات ---
         function showScreen(screenName) {
@@ -117,7 +146,10 @@
 
         // --- منطق اللعبة والبيانات ---
 
-        window.createRoom = async () => {
+        // تحويل الدوال إلى دوال عادية وليست window properties لأننا نستخدم addEventListener
+        async function createRoom() {
+            if (!currentUser) return;
+
             const nameInput = document.getElementById('player-name').value.trim();
             const roomInput = document.getElementById('room-code').value.trim();
 
@@ -126,76 +158,100 @@
                 return;
             }
 
-            currentPlayerName = nameInput;
-            currentRoomId = roomInput;
-            // FIX: Added 'rooms' collection segment to make path valid (6 segments)
-            const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', `room_${currentRoomId}`);
+            btnCreate.disabled = true;
+            btnCreate.innerText = "جاري الإنشاء...";
 
-            // إنشاء حالة أولية للعبة
-            // خلط الأرقام من 1 إلى 10
-            const cards = Array.from({length: 10}, (_, i) => i + 1).sort(() => Math.random() - 0.5);
+            try {
+                currentPlayerName = nameInput;
+                currentRoomId = roomInput;
+                // FIX: Added 'rooms' collection segment to make path valid (6 segments)
+                const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', `room_${currentRoomId}`);
 
-            const initialData = {
-                roomId: currentRoomId,
-                status: 'waiting', // waiting, playing, won
-                players: [{
-                    uid: currentUser.uid,
-                    name: currentPlayerName,
-                    score: 0,
-                    isHost: true
-                }],
-                cards: cards, // ترتيب البطاقات
-                revealedMap: {}, // حالة البطاقات المكشوفة (index -> boolean)
-                nextNumber: 1, // الرقم المطلوب التالي
-                currentTurnIndex: 0,
-                winner: null,
-                lastAction: 'تم إنشاء الغرفة',
-                chat: []
-            };
+                // إنشاء حالة أولية للعبة
+                // خلط الأرقام من 1 إلى 10
+                const cards = Array.from({length: 10}, (_, i) => i + 1).sort(() => Math.random() - 0.5);
 
-            await setDoc(roomRef, initialData);
-            subscribeToRoom();
-        };
-
-        window.joinRoom = async () => {
-            const nameInput = document.getElementById('player-name').value.trim();
-            const roomInput = document.getElementById('room-code').value.trim();
-
-            if (!nameInput || !roomInput) {
-                alert("الرجاء إدخال الاسم وكود الغرفة");
-                return;
-            }
-
-            currentPlayerName = nameInput;
-            currentRoomId = roomInput;
-            // FIX: Added 'rooms' collection segment
-            const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', `room_${currentRoomId}`);
-            const roomSnap = await getDoc(roomRef);
-
-            if (!roomSnap.exists()) {
-                alert("الغرفة غير موجودة!");
-                return;
-            }
-
-            const roomData = roomSnap.data();
-            
-            // التحقق مما إذا كان اللاعب موجوداً بالفعل
-            const playerExists = roomData.players.some(p => p.uid === currentUser.uid);
-            
-            if (!playerExists) {
-                const newPlayer = {
-                    uid: currentUser.uid,
-                    name: currentPlayerName,
-                    score: 0,
-                    isHost: false
+                const initialData = {
+                    roomId: currentRoomId,
+                    status: 'waiting', // waiting, playing, won
+                    players: [{
+                        uid: currentUser.uid,
+                        name: currentPlayerName,
+                        score: 0,
+                        isHost: true
+                    }],
+                    cards: cards, // ترتيب البطاقات
+                    revealedMap: {}, // حالة البطاقات المكشوفة (index -> boolean)
+                    nextNumber: 1, // الرقم المطلوب التالي
+                    currentTurnIndex: 0,
+                    winner: null,
+                    lastAction: 'تم إنشاء الغرفة',
+                    chat: []
                 };
-                // إضافة اللاعب
-                const updatedPlayers = [...roomData.players, newPlayer];
-                await updateDoc(roomRef, { players: updatedPlayers });
+
+                await setDoc(roomRef, initialData);
+                subscribeToRoom();
+            } catch (err) {
+                console.error(err);
+                alert("حدث خطأ أثناء إنشاء الغرفة");
+                btnCreate.disabled = false;
+                btnCreate.innerText = "إنشاء غرفة";
+            }
+        }
+
+        async function joinRoom() {
+            if (!currentUser) return;
+
+            const nameInput = document.getElementById('player-name').value.trim();
+            const roomInput = document.getElementById('room-code').value.trim();
+
+            if (!nameInput || !roomInput) {
+                alert("الرجاء إدخال الاسم وكود الغرفة");
+                return;
             }
 
-            subscribeToRoom();
-        };
+            btnJoin.disabled = true;
+            btnJoin.innerText = "جاري الانضمام...";
+
+            try {
+                currentPlayerName = nameInput;
+                currentRoomId = roomInput;
+                // FIX: Added 'rooms' collection segment
+                const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', `room_${currentRoomId}`);
+                const roomSnap = await getDoc(roomRef);
+
+                if (!roomSnap.exists()) {
+                    alert("الغرفة غير موجودة!");
+                    btnJoin.disabled = false;
+                    btnJoin.innerText = "انضمام";
+                    return;
+                }
+
+                const roomData = roomSnap.data();
+                
+                // التحقق مما إذا كان اللاعب موجوداً بالفعل
+                const playerExists = roomData.players.some(p => p.uid === currentUser.uid);
+                
+                if (!playerExists) {
+                    const newPlayer = {
+                        uid: currentUser.uid,
+                        name: currentPlayerName,
+                        score: 0,
+                        isHost: false
+                    };
+                    // إضافة اللاعب
+                    const updatedPlayers = [...roomData.players, newPlayer];
+                    await updateDoc(roomRef, { players: updatedPlayers });
+                }
+
+                subscribeToRoom();
+            } catch (err) {
+                console.error(err);
+                alert("حدث خطأ أثناء الانضمام");
+                btnJoin.disabled = false;
+                btnJoin.innerText = "انضمام";
+            }
+        }
 
         function subscribeToRoom() {
             if (roomUnsubscribe) roomUnsubscribe();
@@ -220,6 +276,7 @@
             });
         }
 
+        // جعل دالة بدء اللعبة متاحة للزر في اللوبي (حالة خاصة)
         window.startGame = async () => {
              // FIX: Added 'rooms' collection segment
              const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'rooms', `room_${currentRoomId}`);
@@ -391,6 +448,7 @@
 
         // --- الدردشة ---
         
+        // ربط دالة الدردشة للنافذة لأنها تُستدعى من HTML مباشرة (Enter Key)
         window.sendChat = async () => {
             const input = document.getElementById('chat-input');
             const msg = input.value.trim();
@@ -475,11 +533,12 @@
                 </div>
                 
                 <div class="grid grid-cols-2 gap-4 mt-6">
-                    <button onclick="createRoom()" class="bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-lg font-bold transition-all transform hover:scale-105 shadow-lg shadow-indigo-500/30">
-                        <i class="fas fa-plus-circle ml-2"></i>إنشاء غرفة
+                    <!-- تم استبدال onclick بـ ID مع تعطيل مبدئي -->
+                    <button id="btn-create" disabled class="bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-lg font-bold transition-all transform hover:scale-105 shadow-lg shadow-indigo-500/30 opacity-50 cursor-not-allowed">
+                        <i class="fas fa-spinner fa-spin ml-2"></i>جاري الاتصال...
                     </button>
-                    <button onclick="joinRoom()" class="bg-slate-600 hover:bg-slate-500 text-white py-3 rounded-lg font-bold transition-all transform hover:scale-105">
-                        <i class="fas fa-sign-in-alt ml-2"></i>انضمام
+                    <button id="btn-join" disabled class="bg-slate-600 hover:bg-slate-500 text-white py-3 rounded-lg font-bold transition-all transform hover:scale-105 opacity-50 cursor-not-allowed">
+                         <i class="fas fa-spinner fa-spin ml-2"></i>جاري الاتصال...
                     </button>
                 </div>
             </div>
